@@ -1,75 +1,76 @@
 # Quick Start
 
-**60 seconds.** This gets you to using your plugins.
+**60 seconds.** This gets the legal skill pack loaded into Codex CLI.
 
-## Install in Claude Cowork
-1. [Install Claude Desktop](https://claude.com/download)
-2. Get access to Claude Cowork
-3. Follow the instructions in the video below:
+## Install in Codex CLI
 
-https://github.com/user-attachments/assets/51394f0a-5277-4fe2-b81c-5c5e9ac876b5
+From the repository root:
 
-## Install in Claude Code
+```bash
+mkdir -p ~/.codex/skills
+rsync -a .codex/skills/ ~/.codex/skills/
+```
 
-1. **Open Claude Code** (in your terminal) or **Claude Cowork** (the desktop app). Not sure which you have? If you have a terminal window open with Claude in it, that's Claude Code.
+Restart Codex CLI after syncing.
 
-2. **Add the marketplace.** In Claude Code, type `/plugin marketplace add ` (with a space at the end), then **drag the unzipped `claude-for-legal` folder onto the terminal window** — it'll fill in the path. Then press Enter.
+## Run setup
 
-   (Or type the full path: `/plugin marketplace add /Users/you/Desktop/claude-for-legal`)
+Each practice area has a cold-start interview that writes a Codex-side practice profile under `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`.
 
-3. **Install your plugin.** Pick the one that matches your work from the table below, then:
-   ```
-   /plugin install privacy-legal@claude-for-legal
-   ```
+```text
+privacy-legal-cold-start-interview
+commercial-legal-cold-start-interview
+corporate-legal-cold-start-interview
+```
 
-4. **⚠️ Restart Claude Code.** Close and reopen. This step is not optional — the plugin isn't live until you restart.
+Run setup before relying on substantive workflows. Otherwise the skills will either stop or produce generic output because they do not know your playbook, jurisdiction footprint, escalation rules, or house style.
 
-5. **Run setup.** Takes 2 minutes (quick start) or 10-15 minutes (full).
-   ```
-   /privacy-legal:cold-start-interview
-   ```
+## Which skill is for me?
 
-6. **Connect a research tool.** Citations are flagged unverified without one. In Cowork: Settings → Connectors → add CourtListener. In Claude Code: the plugin already lists the research MCP in its config; you'll be prompted to authorize it the first time a skill needs it.
-
-## Install user-scoped, not project-scoped
-
-When you run `/plugin install`, you may be asked whether to install for this project only or for all projects (user scope). **Pick user scope.**
-
-It's counterintuitive: project scope feels safer. But project scope blocks the plugin from reading files outside the project folder — your outlines in Downloads, your contract in Documents, your client file in Dropbox. Most skills need to read your files. User scope doesn't give the plugin any extra access to your files — the plugin can only read files you explicitly point it at or that are in the current directory. It just means the plugin works from any folder instead of one.
-
-If you already installed project-scoped and want to switch: `/plugin uninstall <plugin>`, then `/plugin install <plugin>@claude-for-legal` from your home directory.
-
-## Which plugin is for me?
-
-| You are a… | Install… | First command |
+| You are a... | Start with... | Then try... |
 |---|---|---|
-| Privacy lawyer / DPO | `privacy-legal` | `/privacy-legal:use-case-triage` |
-| Commercial / contracts lawyer | `commercial-legal` | `/commercial-legal:review` |
-| Corporate / M&A lawyer | `corporate-legal` | `/corporate-legal:diligence-issue-extraction` |
-| Employment lawyer / HR counsel | `employment-legal` | `/employment-legal:wage-hour-qa` |
-| Product counsel | `product-legal` | `/product-legal:is-this-a-problem` |
-| IP lawyer / patent agent | `ip-legal` | `/ip-legal:clearance` |
-| Litigator (in-house or firm) | `litigation-legal` | `/litigation-legal:matter-intake` |
-| Regulatory / compliance counsel | `regulatory-legal` | `/regulatory-legal:reg-feed-watcher` |
-| AI governance lead | `ai-governance-legal` | `/ai-governance-legal:use-case-triage` |
-| Clinic supervisor (law school) | `legal-clinic` | `/legal-clinic:cold-start-interview` |
-| Law student | `law-student` | `/law-student:cold-start-interview` |
-| Legal ops / looking for skills | `legal-builder-hub` | `/legal-builder-hub:registry-browser` |
+| Privacy lawyer / DPO | `privacy-legal-cold-start-interview` | `privacy-legal-use-case-triage` |
+| Commercial / contracts lawyer | `commercial-legal-cold-start-interview` | `commercial-legal-review` |
+| Corporate / M&A lawyer | `corporate-legal-cold-start-interview` | `corporate-legal-diligence-issue-extraction` |
+| Employment lawyer / HR counsel | `employment-legal-cold-start-interview` | `employment-legal-wage-hour-qa` |
+| Product counsel | `product-legal-cold-start-interview` | `product-legal-is-this-a-problem` |
+| IP lawyer / patent agent | `ip-legal-cold-start-interview` | `ip-legal-clearance` |
+| Litigator, in-house or firm | `litigation-legal-cold-start-interview` | `litigation-legal-matter-intake` |
+| Regulatory / compliance counsel | `regulatory-legal-cold-start-interview` | `regulatory-legal-reg-feed-watcher` |
+| AI governance lead | `ai-governance-legal-cold-start-interview` | `ai-governance-legal-use-case-triage` |
+| Clinic supervisor | `legal-clinic-cold-start-interview` | `legal-clinic-client-intake` |
+| Law student | `law-student-cold-start-interview` | `law-student-socratic-drill` |
+| Legal ops / looking for skills | `legal-builder-hub-cold-start-interview` | `legal-builder-hub-registry-browser` |
 
 ## What you're installing
 
-Each plugin learns your playbook through a setup interview, writes it to a practice profile file (`~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md`), and every skill reads from it. The profile is yours — edit it, re-run setup, or tell a skill to update it.
+The converted Codex skills live in `.codex/skills/<plugin>-<skill>/SKILL.md`. They are adapted from the upstream Claude plugin skills but use Codex-side configuration paths:
 
-**Every output is a draft for attorney review.** The plugins flag what they're unsure about, mark citations by source, and gate anything irreversible. A lawyer reviews, verifies, and takes responsibility. They make that review faster; they don't replace it.
+```text
+~/.codex/claude-for-legal/company-profile.md
+~/.codex/claude-for-legal/<plugin>/CLAUDE.md
+```
 
-## What's in the box
+The original Claude plugin structure remains in this repository for compatibility.
 
-12 practice-area plugins, 5 managed-agent cookbooks, 16+ connectors. The full reference is in [README.md](README.md).
+## Claude plugin compatibility
+
+If you are using upstream Claude plugin tooling instead of Codex CLI, use the original marketplace flow:
+
+```text
+/plugin marketplace add <path-to-this-repo>
+/plugin install privacy-legal@claude-for-legal
+/privacy-legal:cold-start-interview
+```
+
+That flow writes profiles to `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md`. Codex skills do not read that path unless you copy the profile into `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`.
 
 ## Stuck?
 
-- **"Command not found"** after install → you forgot step 4. Restart Claude Code.
-- **"Run setup first"** → run `/<plugin>:cold-start-interview` before any other command.
-- **Citations flagged `[verify]`** → connect a research tool (step 6). Without one, every cite is from training data, not a current database.
-- **"I can't read [file]"** → most often this means the plugin is project-scoped and the file is outside the project folder. See "Install user-scoped, not project-scoped" above — reinstall user-scoped or move the file into the project folder.
-- **The plugin doesn't do X** → run `/legal-builder-hub:related-skills-surfacer` to find a better match, or check the plugin's README for "What this plugin does not do."
+- **Codex does not see the skills** -> restart Codex CLI after syncing `.codex/skills`.
+- **Run setup first** -> run `<plugin>-cold-start-interview` before any other skill in that practice area.
+- **Citations are flagged `[verify]`** -> configure a legal research connector or verify citations manually before relying on them.
+- **The skill cannot read a file** -> give Codex an accessible local path or move the file into the current workspace.
+- **You need the old Claude command name** -> replace `/plugin:skill` with `plugin-skill`, for example `/privacy-legal:dsar-response` becomes `privacy-legal-dsar-response`.
+
+Every output is a draft for attorney review. The skills flag uncertainty, mark citations by source, and gate irreversible actions. A lawyer reviews, verifies, and takes responsibility.
