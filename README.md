@@ -1,26 +1,24 @@
-# Claude for Legal
+# Claude for Legal for Codex CLI
 
-Reference agents, skills, and data connectors for the legal workflows we see most — in-house commercial, privacy, product, corporate, employment, litigation, regulatory, AI governance, IP, and the learning side of the practice (law school clinics and students).
+Codex CLI adaptation of Anthropic's Claude for Legal reference skills. This fork exposes the legal workflows as Codex-compatible skills under [`.codex/skills/`](.codex/skills) while preserving the upstream Claude plugin source directories.
 
-> **New here?** Start with [QUICKSTART.md](QUICKSTART.md) — install in 60 seconds. This README is the full reference.
+> **New here?** Start with [QUICKSTART.md](QUICKSTART.md) — install the Codex skills in 60 seconds. This README is the full reference.
 
-Everything here is available **two ways from one source**: install it as a [Claude Cowork](https://claude.com/product/cowork) or [Claude Code](https://claude.com/product/claude-code) plugin, or deploy it through the [Claude Managed Agents API](https://docs.claude.com/en/api/managed-agents) behind your own workflow engine. Same system prompt, same skills — you choose where it runs.
+This repository now has **three surfaces from one source**:
 
-## Getting started in Cowork
-- [Install Claude Desktop](https://claude.com/download)
-- Get access to Claude Cowork
-- Follow the instructions in the video below:
-
-https://github.com/user-attachments/assets/51394f0a-5277-4fe2-b81c-5c5e9ac876b5
+- **Codex CLI skills** — 151 converted skills in `.codex/skills/<plugin>-<skill>/SKILL.md`, ready to copy or sync into a Codex skills root.
+- **Upstream Claude plugins** — the original `<plugin>/skills/<skill>/SKILL.md`, `.claude-plugin/plugin.json`, `.mcp.json`, agents, and hooks remain intact for Claude plugin users.
+- **Claude Managed Agent cookbooks** — scheduled-agent templates under `managed-agent-cookbooks/` remain unchanged.
 
 > [!IMPORTANT]
-> **Every output from these plugins is a draft for attorney review — not legal advice, not a legal conclusion, not a substitute for a lawyer.** They are built with guardrails that reflect that: source attribution on every citation, conservative defaults on privilege and subjective legal calls, jurisdiction assumptions surfaced, and explicit gates before anything is filed, sent, or relied on. A lawyer reviews, verifies, and takes professional responsibility for anything that leaves the building. These plugins make that review faster; they do not replace it.
+> **Every output from these skills is a draft for attorney review — not legal advice, not a legal conclusion, not a substitute for a lawyer.** They are built with guardrails that reflect that: source attribution on every citation, conservative defaults on privilege and subjective legal calls, jurisdiction assumptions surfaced, and explicit gates before anything is filed, sent, or relied on. A lawyer reviews, verifies, and takes professional responsibility for anything that leaves the building. These skills make that review faster; they do not replace it.
 >
-> **These plugins do not represent Anthropic's legal positions.** They are tools that help lawyers analyze issues. Where a skill includes a checklist item, a suggested framework, a risk flag, or a characterization of case law or regulatory guidance, that is an aid to the reviewing attorney's own analysis, not a statement of Anthropic's view of the law. The law in many of these areas is unsettled and evolving. The attorney using the plugin — not the plugin, and not Anthropic — is responsible for the legal positions taken in their work product.
+> **These skills do not represent Anthropic's legal positions.** They are tools that help lawyers analyze issues. Where a skill includes a checklist item, a suggested framework, a risk flag, or a characterization of case law or regulatory guidance, that is an aid to the reviewing attorney's own analysis, not a statement of Anthropic's view of the law. The law in many of these areas is unsettled and evolving. The attorney using the skill — not the skill, not this fork, and not Anthropic — is responsible for the legal positions taken in their work product.
 
 What's in the repo:
 
-- **Practice-area plugins** covering in-house, firm, and academic legal work — each one built around a cold-start interview that learns your playbook and a `CLAUDE.md` practice profile that every skill reads from.
+- **Codex practice-area skills** covering in-house, firm, and academic legal work — each one adapted from the upstream Claude skill and wired to a Codex-side practice profile under `~/.codex/claude-for-legal/`.
+- **Practice-area Claude plugins** covering the same workflows — each one built around a cold-start interview that learns your playbook and a `CLAUDE.md` practice profile that every skill reads from.
 - **Managed-agent cookbooks** for the scheduled, eyes-on-the-feed workflows (renewal watcher, docket watcher, regulatory feed monitor, diligence grid, launch radar).
 - **MCP connectors** across general productivity (Slack, Google Drive, Box) and legal-specific systems (Ironclad, DocuSign, iManage, Everlaw, CourtListener, and more).
 - **[Named agents](#agents)** — end-to-end workflow agents (Vendor Agreement Reviewer, DSAR Responder, Termination Reviewer, Claim Chart Builder, …) with job-style names and a single command to run each one.
@@ -167,9 +165,49 @@ Each plugin directory has the same shape:
   hooks/                  # pre- and post-tool hooks (if any)
 ```
 
+The Codex adaptation is generated into a separate tree:
+
+```
+.codex/
+  README.md               # Codex installation and invocation notes
+  skills/
+    commercial-legal-review/
+      SKILL.md
+    privacy-legal-dsar-response/
+      SKILL.md
+    ...
+```
+
+Codex skill names use `<plugin>-<skill>` instead of Claude's slash-command form. For example, Claude's `/privacy-legal:dsar-response` becomes `privacy-legal-dsar-response`.
+
+Regenerate the Codex tree after editing upstream skills with:
+
+```bash
+python3 scripts/convert_to_codex_skills.py
+```
+
 ## Getting Started
 
-### Claude Cowork
+### Codex CLI
+
+Install the converted skills by copying or syncing `.codex/skills` into a Codex skills root:
+
+```bash
+mkdir -p ~/.codex/skills
+rsync -a .codex/skills/ ~/.codex/skills/
+```
+
+Restart Codex CLI so the new skill descriptions are loaded. Then invoke a workflow by name or by natural language:
+
+```text
+privacy-legal-dsar-response
+commercial-legal-review vendor-msa.pdf
+ai-governance-legal-use-case-triage "Sales wants to use AI to score leads automatically"
+```
+
+Practice profiles for this fork live under `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`; shared organization facts live at `~/.codex/claude-for-legal/company-profile.md`. Run the matching `<plugin>-cold-start-interview` before relying on other skills in that practice area.
+
+### Upstream Claude Cowork
 
 In Cowork:
 
@@ -179,7 +217,7 @@ In Cowork:
 
 After install, skills fire automatically when relevant, slash commands are available via `/`, and the scheduled agents run on the cadence set in their frontmatter.
 
-### Claude Code
+### Upstream Claude Code
 
 ```bash
 # Add the marketplace (use the absolute path to this repo or a GitHub URL)
@@ -224,10 +262,12 @@ Each template under [`managed-agent-cookbooks/`](./managed-agent-cookbooks) refe
 
 | | What it is | Where it lives |
 |---|---|---|
-| **Plugins** | Self-contained practice-area bundles — skills, agents, hooks, and a template practice profile. Install the ones you need. | `<plugin>/` |
-| **Skills** | Domain expertise, conventions, and step-by-step methods Claude draws on automatically when relevant — and slash actions you trigger explicitly: `/commercial-legal:review`, `/privacy-legal:dsar-response`, `/litigation-legal:claim-chart`. | `<plugin>/skills/<skill>/SKILL.md` |
+| **Codex skills** | Codex-compatible legal workflows generated from the upstream Claude skills. Trigger by name or natural language: `commercial-legal-review`, `privacy-legal-dsar-response`, `litigation-legal-claim-chart`. | `.codex/skills/<plugin>-<skill>/SKILL.md` |
+| **Claude plugins** | Self-contained practice-area bundles — skills, agents, hooks, and a template practice profile. Install the ones you need when using Claude plugin tooling. | `<plugin>/` |
+| **Upstream skills** | Original domain expertise, conventions, and step-by-step methods Claude draws on automatically when relevant — and slash actions you trigger explicitly: `/commercial-legal:review`, `/privacy-legal:dsar-response`, `/litigation-legal:claim-chart`. | `<plugin>/skills/<skill>/SKILL.md` |
 | **Agents** | Scheduled or event-driven workflows (renewal watcher, docket watcher, reg-change monitor). Runs in the background, posts to a channel or writes a file. | `<plugin>/agents/` |
-| **Practice profile** | Plain-English `CLAUDE.md` describing your playbook, escalation rules, and house style. Every skill reads from it. | `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md` |
+| **Codex practice profile** | Plain-English `CLAUDE.md` describing your playbook, escalation rules, and house style for the Codex fork. Every converted skill reads from it. | `~/.codex/claude-for-legal/<plugin>/CLAUDE.md` |
+| **Claude practice profile** | Upstream Claude plugin profile path. | `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md` |
 | **Connectors** | [MCP servers](https://modelcontextprotocol.io/) that wire Claude to your data — CLM, DMS, e-discovery, research platforms, productivity. | `.mcp.json` (per plugin) |
 | **Managed-agent cookbooks** | `agent.yaml` + depth-1 subagents + steering examples for headless deployment. | `managed-agent-cookbooks/<slug>/` |
 
@@ -343,7 +383,7 @@ For IT admins deploying the add-in against your own cloud (Vertex AI, Bedrock, o
 These are reference templates. They get better when you tune them to how your team works — and the customization mechanism is the plugin itself, not a config file buried in a repo.
 
 - **Run the cold-start interview.** It **is** the customization mechanism. It asks how your practice works, reads your seed documents, and writes your practice profile. Every other skill reads from that profile. A `/commercial-legal:cold-start-interview` with five signed MSAs, your playbook, and your escalation matrix will make the review skills noticeably sharper.
-- **Edit the practice profile.** Your profile lives at `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md`. Edit it directly for small fixes — a wrong escalation threshold, a new integration, a policy update. It survives plugin updates.
+- **Edit the practice profile.** For Codex CLI, your profile lives at `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`. For upstream Claude plugins, it lives at `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md`. Edit it directly for small fixes — a wrong escalation threshold, a new integration, a policy update. It survives plugin updates.
 - **Re-run setup.** `/<plugin>:cold-start-interview` again for a full re-interview when your practice shifts materially (new jurisdiction, new CLM, new policy).
 - **Swap connectors.** Point `.mcp.json` at your CLM, DMS, e-discovery platform, launch tracker, HRIS. Skills fall back gracefully when a connector isn't configured — no silent no-ops.
 - **Bring your playbook and templates.** Drop your terminology, house style, and branded templates into the plugin's `CLAUDE.md` and `references/`. The skills will pick them up.
@@ -565,7 +605,8 @@ The full map across all plugins. The cold-start interview is the first thing to 
 
 Everything here is markdown and JSON. Fork, edit, PR.
 
-- **New skill** → add it under `<plugin>/skills/<skill-name>/SKILL.md` with the frontmatter the existing skills use (`name`, `description`, `argument-hint`). Keep the description under 1024 characters — it's the trigger signal. The skill is invokable as `/<plugin>:<skill-name>`. Mark pure-reference skills `user-invocable: false`.
+- **New upstream skill** → add it under `<plugin>/skills/<skill-name>/SKILL.md` with the frontmatter the existing skills use (`name`, `description`, `argument-hint`). Keep the description under 1024 characters — it's the trigger signal. The skill is invokable as `/<plugin>:<skill-name>`. Mark pure-reference skills `user-invocable: false`.
+- **New Codex skill** → run `python3 scripts/convert_to_codex_skills.py` to regenerate `.codex/skills/<plugin>-<skill-name>/SKILL.md`. Keep Codex paths pointed at `~/.codex/claude-for-legal/` and command examples in `<plugin>-<skill>` form.
 - **New agent** → add `<plugin>/agents/<name>.md` with scheduling frontmatter and the system prompt. Add a matching `managed-agent-cookbooks/<name>/` if you want headless deployment.
 - **Community skills** → use `/legal-builder-hub:skill-installer` to test a community skill in your environment. The hub runs `/legal-builder-hub:skills-qa` against every skill before installing — it scores the skill against the Legal Skill Design Framework (nine design parameters, three legal failure modes, a trust-surface check) and rejects anything that fails.
 - **Validate cookbooks before pushing** → `bash scripts/test-cookbooks.sh` dry-runs every managed-agent cookbook and lints orchestrator tool scope.
