@@ -1,0 +1,59 @@
+# Default Codex install set.
+#
+# This starter set keeps the active skill surface small enough for normal Codex
+# sessions while covering setup plus the highest-value workflows across the
+# legal pack. Use scripts/install_codex_skills.sh --all for the full 151-skill
+# pack.
+
+ai-governance-legal-cold-start-interview
+ai-governance-legal-use-case-triage
+ai-governance-legal-aia-generation
+ai-governance-legal-vendor-ai-review
+
+commercial-legal-cold-start-interview
+commercial-legal-review
+commercial-legal-amendment-history
+commercial-legal-renewal-tracker
+
+corporate-legal-cold-start-interview
+corporate-legal-diligence-issue-extraction
+corporate-legal-tabular-review
+
+employment-legal-cold-start-interview
+employment-legal-termination-review
+employment-legal-wage-hour-qa
+employment-legal-worker-classification
+
+ip-legal-cold-start-interview
+ip-legal-clearance
+ip-legal-fto-triage
+
+law-student-cold-start-interview
+law-student-socratic-drill
+law-student-irac-practice
+
+legal-builder-hub-cold-start-interview
+legal-builder-hub-registry-browser
+legal-builder-hub-skills-qa
+
+legal-clinic-cold-start-interview
+legal-clinic-client-intake
+
+litigation-legal-cold-start-interview
+litigation-legal-matter-intake
+litigation-legal-claim-chart
+litigation-legal-demand-draft
+
+privacy-legal-cold-start-interview
+privacy-legal-dsar-response
+privacy-legal-dpa-review
+privacy-legal-use-case-triage
+
+product-legal-cold-start-interview
+product-legal-is-this-a-problem
+product-legal-launch-review
+product-legal-marketing-claims-review
+
+regulatory-legal-cold-start-interview
+regulatory-legal-reg-feed-watcher
+regulatory-legal-policy-diff
