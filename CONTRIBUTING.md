@@ -7,7 +7,7 @@ guide.
 ## Before your first PR
 
 Sign the CLA. The first time you open a pull request, the CLA Assistant bot will
-comment with a link to the [CLA](CLA.md) and ask you to confirm. Reply with
+comment with a link to the CLA and ask you to confirm. Reply with
 `I have read the CLA Document and I hereby sign the CLA` and the check will pass.
 You only need to do this once.
 
