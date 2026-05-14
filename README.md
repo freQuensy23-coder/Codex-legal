@@ -27,6 +27,8 @@ What's in the repo:
 
 Each agent is named for the workflow it runs. They're the most common surface — start with the ones that match your work, then tune the underlying skill, the practice profile, and the connectors to how your team does it.
 
+The command column keeps the upstream Claude slash-command form. In Codex CLI, use the converted skill name by replacing `/plugin:skill` with `plugin-skill`; for example, `/privacy-legal:dsar-response` becomes `privacy-legal-dsar-response`.
+
 | Agent | What it does | Plugin | Command |
 |---|---|---|---|
 | **Vendor Agreement Reviewer** | Reviews a vendor MSA against your playbook and produces a redline memo | `commercial-legal` | `/commercial-legal:review` |
@@ -190,12 +192,13 @@ python3 scripts/convert_to_codex_skills.py
 
 ### Codex CLI
 
-Install the converted skills by copying or syncing `.codex/skills` into a Codex skills root:
+Install the starter set into the Codex user skills root:
 
 ```bash
-mkdir -p ~/.codex/skills
-rsync -a .codex/skills/ ~/.codex/skills/
+scripts/install_codex_skills.sh --starter --init-config
 ```
+
+The installer treats this pack as third-party/runtime-installed skills: it writes to `~/.codex/skills`, does not write to `.agents/skills`, and does not overwrite existing skills unless `--force` is passed. Use `--all` only when you explicitly want the full 151-skill pack installed.
 
 Restart Codex CLI so the new skill descriptions are loaded. Then invoke a workflow by name or by natural language:
 
@@ -206,6 +209,8 @@ ai-governance-legal-use-case-triage "Sales wants to use AI to score leads automa
 ```
 
 Practice profiles for this fork live under `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`; shared organization facts live at `~/.codex/claude-for-legal/company-profile.md`. Run the matching `<plugin>-cold-start-interview` before relying on other skills in that practice area.
+
+Starter selection lives in [`.codex/starter-skills.txt`](.codex/starter-skills.txt). Smoke tests are in [`docs/codex-smoke-tests.md`](docs/codex-smoke-tests.md).
 
 ### Upstream Claude Cowork
 

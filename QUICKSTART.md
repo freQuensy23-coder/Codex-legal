@@ -4,14 +4,25 @@
 
 ## Install in Codex CLI
 
-From the repository root:
+Default install uses the starter set, not the full 151-skill pack. This keeps Codex startup light and follows the local rule for third-party/runtime-installed skills.
 
 ```bash
-mkdir -p ~/.codex/skills
-rsync -a .codex/skills/ ~/.codex/skills/
+scripts/install_codex_skills.sh --starter --init-config
 ```
 
 Restart Codex CLI after syncing.
+
+For a dry run:
+
+```bash
+scripts/install_codex_skills.sh --starter --dry-run
+```
+
+For the full pack, opt in explicitly:
+
+```bash
+scripts/install_codex_skills.sh --all --init-config
+```
 
 ## Run setup
 
@@ -52,6 +63,10 @@ The converted Codex skills live in `.codex/skills/<plugin>-<skill>/SKILL.md`. Th
 ```
 
 The original Claude plugin structure remains in this repository for compatibility.
+
+The starter list is maintained in `.codex/starter-skills.txt`. The full generated set remains available under `.codex/skills/`.
+
+Smoke tests are in [docs/codex-smoke-tests.md](docs/codex-smoke-tests.md).
 
 ## Claude plugin compatibility
 
