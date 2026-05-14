@@ -4,14 +4,20 @@ This directory contains the Codex CLI adaptation of Claude for Legal.
 
 ## Install
 
-From the repository root:
+Default install uses the starter set, not the full 151-skill pack. This keeps Codex startup light and follows the local rule for third-party/runtime-installed skills.
 
 ```bash
-mkdir -p ~/.codex/skills
-rsync -a .codex/skills/ ~/.codex/skills/
+scripts/install_codex_skills.sh --starter --init-config
 ```
 
 Restart Codex CLI after syncing so the skill descriptions are loaded.
+
+Use `--dry-run` to preview changes. Use `--all` only when you want every generated skill installed:
+
+```bash
+scripts/install_codex_skills.sh --starter --dry-run
+scripts/install_codex_skills.sh --all --init-config
+```
 
 ## Invoke
 
@@ -41,6 +47,8 @@ Run the relevant `<plugin>-cold-start-interview` skill before relying on other s
 ## Scope
 
 - `skills/` contains 151 converted `SKILL.md` files.
+- `starter-skills.txt` lists the default install set.
+- `templates/README.md` explains how Codex-side practice-profile templates are initialized.
 - Original Claude plugin files remain in the repository root under `<plugin>/`.
 - Managed-agent cookbooks and `.mcp.json` connector declarations are preserved from upstream, but Codex MCP setup may require separate local configuration.
 
