@@ -3,79 +3,63 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Install Claude for Legal skills into a Codex CLI skills root.
+Install Claude for Legal into Codex CLI.
 
-Default behavior follows the local Codex skill governance rules:
-- install only the starter set, not all 151 skills
-- install into ~/.codex/skills as third-party/runtime-installed skills
-- do not write to ~/.agents/skills
-- do not overwrite existing skills unless --force is passed
+Default behavior installs only the starter skill set. Optional flags install
+practice profiles, MCP servers, and converted custom subagents.
 
 Usage:
-  scripts/install_codex_skills.sh [--starter|--all] [--target DIR] [--dry-run] [--force] [--init-config] [--config-target DIR]
+  scripts/install_codex_skills.sh [--starter|--all] [--target DIR] [--dry-run] [--force] [--init-config] [--init-mcp] [--init-agents] [--config-target DIR] [--mcp-config FILE] [--agents-target DIR]
 
 Options:
   --starter      Install .codex/starter-skills.txt (default).
   --all          Install every skill under .codex/skills.
-  --target DIR   Install target. Default: ~/.codex/skills.
+  --target DIR   Skill target. Default: ~/.codex/skills.
   --config-target DIR
-                 Config template target. Default: ~/.codex/claude-for-legal.
+                 Practice-profile target. Default: ~/.codex/claude-for-legal.
+  --mcp-config FILE
+                 Codex MCP config target. Default: ~/.codex/config.toml.
+  --agents-target DIR
+                 Custom-agent target. Default: ~/.codex/agents.
   --dry-run      Print actions without copying files.
-  --force        Overwrite existing target skill directories.
-  --init-config  Also initialize ~/.codex/claude-for-legal templates if missing.
+  --force        Overwrite existing target skills/agents/config templates.
+  --init-config  Initialize ~/.codex/claude-for-legal practice profiles.
+  --init-mcp     Port repository .mcp.json declarations into Codex config.toml.
+  --init-agents  Install generated Codex custom subagents.
   -h, --help     Show this help.
 EOF
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 skills_root="$repo_root/.codex/skills"
+agents_root="$repo_root/.codex/agents"
 starter_file="$repo_root/.codex/starter-skills.txt"
 target="${HOME}/.codex/skills"
 config_target="${HOME}/.codex/claude-for-legal"
+mcp_config="${HOME}/.codex/config.toml"
+agents_target="${HOME}/.codex/agents"
 mode="starter"
 dry_run=0
 force=0
 init_config=0
+init_mcp=0
+init_agents=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --starter)
-      mode="starter"
-      shift
-      ;;
-    --all)
-      mode="all"
-      shift
-      ;;
-    --target)
-      target="${2:?--target requires a directory}"
-      shift 2
-      ;;
-    --config-target)
-      config_target="${2:?--config-target requires a directory}"
-      shift 2
-      ;;
-    --dry-run)
-      dry_run=1
-      shift
-      ;;
-    --force)
-      force=1
-      shift
-      ;;
-    --init-config)
-      init_config=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      usage >&2
-      exit 2
-      ;;
+    --starter) mode="starter"; shift ;;
+    --all) mode="all"; shift ;;
+    --target) target="${2:?--target requires a directory}"; shift 2 ;;
+    --config-target) config_target="${2:?--config-target requires a directory}"; shift 2 ;;
+    --mcp-config) mcp_config="${2:?--mcp-config requires a file}"; shift 2 ;;
+    --agents-target) agents_target="${2:?--agents-target requires a directory}"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    --force) force=1; shift ;;
+    --init-config) init_config=1; shift ;;
+    --init-mcp) init_mcp=1; shift ;;
+    --init-agents) init_agents=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
@@ -87,13 +71,13 @@ fi
 
 skill_names=()
 if [[ "$mode" == "all" ]]; then
-  while IFS= read -r skill; do
-    skill_names+=("$skill")
-  done < <(find "$skills_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
+  while IFS= read -r skill; do skill_names+=("$skill"); done < <(
+    find "$skills_root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort
+  )
 else
-  while IFS= read -r skill; do
-    skill_names+=("$skill")
-  done < <(sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$starter_file")
+  while IFS= read -r skill; do skill_names+=("$skill"); done < <(
+    sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' "$starter_file"
+  )
 fi
 
 if [[ ${#skill_names[@]} -eq 0 ]]; then
@@ -105,7 +89,6 @@ missing=()
 for skill in "${skill_names[@]}"; do
   [[ -d "$skills_root/$skill" ]] || missing+=("$skill")
 done
-
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Starter list references missing skills:" >&2
   printf '  %s\n' "${missing[@]}" >&2
@@ -123,42 +106,28 @@ fi
 echo "Mode: $mode"
 echo "Selected skills: ${#skill_names[@]}"
 echo "Target: $target"
-if [[ "$dry_run" -eq 1 ]]; then
-  echo "Dry run: yes"
-fi
-
-if [[ "$dry_run" -eq 0 ]]; then
-  mkdir -p "$target"
-fi
+[[ "$dry_run" -eq 1 ]] && echo "Dry run: yes"
+[[ "$dry_run" -eq 0 ]] && mkdir -p "$target"
 
 installed=0
 skipped=0
 overwritten=0
-
 for skill in "${skill_names[@]}"; do
   src="$skills_root/$skill"
   dst="$target/$skill"
-
   if [[ -e "$dst" && "$force" -ne 1 ]]; then
     echo "skip existing: $skill"
     skipped=$((skipped + 1))
     continue
   fi
-
   if [[ "$dry_run" -eq 1 ]]; then
-    if [[ -e "$dst" && "$force" -eq 1 ]]; then
-      echo "would overwrite: $skill"
-    else
-      echo "would install: $skill"
-    fi
+    [[ -e "$dst" && "$force" -eq 1 ]] && echo "would overwrite: $skill" || echo "would install: $skill"
     continue
   fi
-
   if [[ -e "$dst" ]]; then
     rm -rf "$dst"
     overwritten=$((overwritten + 1))
   fi
-
   cp -R "$src" "$dst"
   installed=$((installed + 1))
   echo "installed: $skill"
@@ -166,10 +135,7 @@ done
 
 if [[ "$init_config" -eq 1 ]]; then
   echo "Initializing Codex-side config templates under $config_target"
-  if [[ "$dry_run" -eq 0 ]]; then
-    mkdir -p "$config_target"
-  fi
-
+  [[ "$dry_run" -eq 0 ]] && mkdir -p "$config_target"
   if [[ "$dry_run" -eq 1 ]]; then
     echo "would init config: company-profile.md"
   elif [[ ! -e "$config_target/company-profile.md" || "$force" -eq 1 ]]; then
@@ -191,29 +157,53 @@ if [[ "$init_config" -eq 1 ]]; then
 import re
 import sys
 from pathlib import Path
-
 src = Path(sys.argv[1])
 dst = Path(sys.argv[2])
-
 text = src.read_text()
-text = text.replace(
-    "~/.claude/plugins/config/claude-for-legal",
-    "~/.codex/claude-for-legal",
-)
-text = text.replace(
-    "~/.claude/plugins/cache/claude-for-legal",
-    "~/.codex/claude-for-legal/cache",
-)
-text = re.sub(
-    r"/([a-z][a-z0-9-]+):([a-z][a-z0-9-]+)",
-    r"\1-\2",
-    text,
-)
+text = text.replace("~/.claude/plugins/config/claude-for-legal", "~/.codex/claude-for-legal")
+text = text.replace("~/.claude/plugins/cache/claude-for-legal", "~/.codex/claude-for-legal/cache")
+text = re.sub(r"/([a-z][a-z0-9-]+):([a-z][a-z0-9-]+)", r"\1-\2", text)
 dst.write_text(text)
 PY
     fi
   done
 fi
 
+if [[ "$init_agents" -eq 1 ]]; then
+  if [[ ! -d "$agents_root" ]]; then
+    echo "Missing generated agents directory: $agents_root" >&2
+    echo "Run: python3 scripts/convert_to_codex_agents.py" >&2
+    exit 1
+  fi
+  echo "Installing Codex custom agents into $agents_target"
+  [[ "$dry_run" -eq 0 ]] && mkdir -p "$agents_target"
+  for src in "$agents_root"/*.toml; do
+    [[ -f "$src" ]] || continue
+    dst="$agents_target/$(basename "$src")"
+    if [[ -e "$dst" && "$force" -ne 1 ]]; then
+      echo "skip existing agent: $(basename "$src")"
+      continue
+    fi
+    if [[ "$dry_run" -eq 1 ]]; then
+      echo "would install agent: $(basename "$src")"
+    else
+      cp "$src" "$dst"
+      echo "installed agent: $(basename "$src")"
+    fi
+  done
+fi
+
+if [[ "$init_mcp" -eq 1 ]]; then
+  if [[ "$dry_run" -eq 1 ]]; then
+    echo "would port repository MCP declarations to $mcp_config"
+    python3 "$repo_root/scripts/install_codex_mcp.py" --dry-run >/dev/null
+  else
+    python3 "$repo_root/scripts/install_codex_mcp.py" --target "$mcp_config"
+  fi
+fi
+
 echo "Summary: installed=$installed skipped=$skipped overwritten=$overwritten"
-echo "Restart Codex CLI to load newly installed skill descriptions."
+if [[ "$init_mcp" -eq 1 && "$dry_run" -eq 0 ]]; then
+  echo "Run 'codex mcp list' and complete any OAuth logins printed above."
+fi
+echo "Restart Codex CLI after installing skills, agents, or MCP configuration."
