@@ -51,6 +51,8 @@ jobs:
           cp "$PORT_ROOT/scripts/convert_to_codex_agents.py" scripts/convert_to_codex_agents.py
           cp "$PORT_ROOT/scripts/install_codex_mcp.py" scripts/install_codex_mcp.py
           cp "$PORT_ROOT/scripts/install_codex_skills.sh" scripts/install_codex_skills.sh
+          cp "$PORT_ROOT/.codex/README.md" .codex/README.md
+          cp "$PORT_ROOT/QUICKSTART.md" QUICKSTART.md
 
           python3 scripts/convert_to_codex_skills.py
           python3 scripts/convert_to_codex_agents.py
@@ -69,6 +71,8 @@ jobs:
 
           bash -n scripts/install_codex_skills.sh
           python3 scripts/install_codex_mcp.py --check
+          grep -q -- '--init-mcp' QUICKSTART.md
+          grep -q -- '--init-agents' QUICKSTART.md
 
           test -f .codex/README.md
           test -f .codex/starter-skills.txt
