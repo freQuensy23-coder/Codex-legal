@@ -1,0 +1,227 @@
+name: Real Codex 0.152.1 runtime smoke
+
+on:
+  push:
+    branches: [runtime-smoke-01521]
+    paths:
+      - .github/workflows/runtime-smoke-01521.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout tested port
+        uses: actions/checkout@v4
+
+      - name: Install exact Codex 0.152.1 release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/openai/codex/releases/download/rust-v0.152.1/codex-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL "$url" -o /tmp/codex.tar.gz
+          echo "a0ed1b40b1d597b340f09ae00ecebc46670b06cb52aac315b9dc84fed0289fd0  /tmp/codex.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/codex-bin
+          tar -xzf /tmp/codex.tar.gz -C /tmp/codex-bin
+          codex_bin="$(find /tmp/codex-bin -type f -name 'codex*' -perm -111 | head -1)"
+          test -n "$codex_bin"
+          sudo install -m 0755 "$codex_bin" /usr/local/bin/codex
+          codex --version | tee /tmp/codex-version.txt
+          grep -Eq '0\.152\.1' /tmp/codex-version.txt
+
+      - name: Regenerate and validate complete port surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/convert_to_codex_skills.py
+          python3 scripts/convert_to_codex_agents.py
+          test "$(find .codex/skills -mindepth 1 -maxdepth 1 -type d | wc -l)" -ge 151
+          test "$(find .codex/agents -mindepth 1 -maxdepth 1 -type f -name '*.toml' | wc -l)" -gt 0
+
+      - name: Validate native Claude marketplace compatibility in real Codex
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/plugin-home"
+          export CODEX_HOME="$HOME/.codex"
+          mkdir -p "$CODEX_HOME"
+          codex plugin marketplace add "$GITHUB_WORKSPACE" --json | tee /tmp/marketplace-add.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/marketplace-add.json'))
+          assert data['marketplaceName'] == 'claude-for-legal', data
+          PY
+          codex plugin list --marketplace claude-for-legal --available --json | tee /tmp/plugin-list-before.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/plugin-list-before.json'))
+          names={x['name'] for x in data.get('available', [])} | {x['name'] for x in data.get('installed', [])}
+          assert 'litigation-legal' in names, names
+          PY
+          codex plugin add litigation-legal@claude-for-legal --json | tee /tmp/plugin-add.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/plugin-add.json'))
+          assert data['name'] == 'litigation-legal', data
+          assert data['marketplaceName'] == 'claude-for-legal', data
+          PY
+          codex plugin list --marketplace claude-for-legal --json | tee /tmp/plugin-list-after.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/plugin-list-after.json'))
+          installed={x['name'] for x in data.get('installed', [])}
+          assert 'litigation-legal' in installed, installed
+          PY
+
+      - name: Validate full skills, agents, profiles, and MCP install surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/full-home"
+          export CODEX_HOME="$HOME/.codex"
+          scripts/install_codex_skills.sh --all --init-config --init-agents
+          skill_count="$(find "$CODEX_HOME/skills" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+          agent_count="$(find "$CODEX_HOME/agents" -mindepth 1 -maxdepth 1 -type f -name '*.toml' | wc -l)"
+          test "$skill_count" -ge 151
+          test "$agent_count" -gt 0
+          test -f "$CODEX_HOME/skills/litigation-legal-claim-chart/SKILL.md"
+          test -f "$CODEX_HOME/agents/litigation-legal-docket-watcher.toml"
+          test -f "$CODEX_HOME/claude-for-legal/litigation-legal/CLAUDE.md"
+
+          export HOME="$RUNNER_TEMP/mcp-home"
+          export CODEX_HOME="$HOME/.codex"
+          scripts/install_codex_skills.sh --starter --init-mcp
+          codex mcp list | tee /tmp/mcp-list.txt
+          grep -q 'courtlistener' /tmp/mcp-list.txt
+          grep -q 'google-drive' /tmp/mcp-list.txt
+          grep -q 'slack' /tmp/mcp-list.txt
+          grep -q 'cocounsel-legal' /tmp/mcp-list.txt
+
+      - name: Start local mocked Responses API
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet zstandard
+          cat >/tmp/mock_responses.py <<'PY'
+          import io, json, os, threading
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          import zstandard as zstd
+
+          LOG='/tmp/codex-requests.jsonl'
+
+          def decode_body(raw, encoding):
+              if encoding and any(x.strip().lower() == 'zstd' for x in encoding.split(',')):
+                  with zstd.ZstdDecompressor().stream_reader(io.BytesIO(raw)) as reader:
+                      return reader.read()
+              return raw
+
+          def sse(events):
+              return ''.join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+
+          class H(BaseHTTPRequestHandler):
+              def log_message(self, *args):
+                  pass
+              def do_GET(self):
+                  if self.path.endswith('/models'):
+                      body=json.dumps({'object':'list','data':[{'id':'gpt-5.6','object':'model','created':0,'owned_by':'mock'}]}).encode()
+                      self.send_response(200); self.send_header('content-type','application/json'); self.send_header('content-length',str(len(body))); self.end_headers(); self.wfile.write(body); return
+                  self.send_error(404)
+              def do_POST(self):
+                  n=int(self.headers.get('content-length','0'))
+                  raw=self.rfile.read(n)
+                  decoded=decode_body(raw,self.headers.get('content-encoding'))
+                  body=json.loads(decoded)
+                  with open(LOG,'a',encoding='utf-8') as f:
+                      f.write(json.dumps({'path':self.path,'body':body},ensure_ascii=False)+'\n')
+                  if not self.path.endswith('/responses'):
+                      self.send_error(404); return
+                  rid='resp-runtime-1'
+                  events=[
+                      {'type':'response.created','response':{'id':rid}},
+                      {'type':'response.output_item.done','item':{'type':'message','role':'assistant','id':'msg-runtime-1','content':[{'type':'output_text','text':'MOCK_OK'}]}},
+                      {'type':'response.completed','response':{'id':rid,'usage':{'input_tokens':1,'input_tokens_details':None,'output_tokens':1,'output_tokens_details':None,'total_tokens':2}}},
+                  ]
+                  payload=sse(events)
+                  self.send_response(200); self.send_header('content-type','text/event-stream'); self.send_header('content-length',str(len(payload))); self.send_header('connection','close'); self.end_headers(); self.wfile.write(payload); self.wfile.flush()
+
+          ThreadingHTTPServer(('127.0.0.1',18080),H).serve_forever()
+          PY
+          nohup python3 /tmp/mock_responses.py >/tmp/mock-responses.log 2>&1 &
+          echo $! >/tmp/mock-responses.pid
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18080/v1/models >/dev/null && exit 0
+            sleep 0.2
+          done
+          cat /tmp/mock-responses.log
+          exit 1
+
+      - name: Run real Codex exec against mock and inspect request
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/runtime-home"
+          export CODEX_HOME="$HOME/.codex"
+          mkdir -p "$CODEX_HOME"
+          scripts/install_codex_skills.sh --starter --init-config --init-agents
+          cat >"$CODEX_HOME/config.toml" <<'TOML'
+          model = "gpt-5.6"
+          model_reasoning_effort = "xhigh"
+          model_provider = "mock_provider"
+          approval_policy = "never"
+          sandbox_mode = "read-only"
+
+          [features]
+          multi_agent = true
+          multi_agent_v2 = true
+
+          [model_providers.mock_provider]
+          name = "Local mock provider"
+          base_url = "http://127.0.0.1:18080/v1"
+          wire_api = "responses"
+          requires_openai_auth = false
+          supports_websockets = false
+          request_max_retries = 0
+          stream_max_retries = 0
+          TOML
+
+          codex exec 'Runtime smoke test. The relevant installed skill is litigation-legal-claim-chart.' | tee /tmp/codex-exec.txt
+          grep -q 'MOCK_OK' /tmp/codex-exec.txt
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('/tmp/codex-requests.jsonl').read_text().splitlines() if x.strip()]
+          assert rows, 'Codex made no request to the local mock'
+          body=rows[0]['body']
+          assert body.get('model') == 'gpt-5.6', body.get('model')
+          reasoning=body.get('reasoning') or {}
+          assert reasoning.get('effort') == 'xhigh', reasoning
+          blob=json.dumps(body,ensure_ascii=False)
+          assert 'litigation-legal-claim-chart' in blob, 'installed claim-chart skill missing from actual model request'
+          assert 'litigation-legal-docket-watcher' in blob, 'custom legal agent role missing from actual model request'
+          assert 'spawn_agent' in blob, 'multi-agent spawn tool missing from actual model request'
+          print('REAL_CODEX_RUNTIME_OK')
+          print('model=',body.get('model'))
+          print('reasoning=',reasoning.get('effort'))
+          print('requests=',len(rows))
+          PY
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-01521-runtime-evidence
+          path: |
+            /tmp/codex-version.txt
+            /tmp/marketplace-add.json
+            /tmp/plugin-list-before.json
+            /tmp/plugin-add.json
+            /tmp/plugin-list-after.json
+            /tmp/mcp-list.txt
+            /tmp/codex-exec.txt
+            /tmp/codex-requests.jsonl
+            /tmp/mock-responses.log
