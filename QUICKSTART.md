@@ -1,27 +1,29 @@
 # Quick Start
 
-**60 seconds.** This gets the legal skill pack loaded into Codex CLI.
-
 ## Install in Codex CLI
 
-Default install uses the starter set, not the full 151-skill pack. This keeps Codex startup light and follows the local rule for third-party/runtime-installed skills.
+Install the starter skill set plus the Codex practice profiles, custom subagents, and MCP connectors:
 
 ```bash
-scripts/install_codex_skills.sh --starter --init-config
+scripts/install_codex_skills.sh --starter --init-config --init-agents --init-mcp
 ```
 
-Restart Codex CLI after syncing.
+Restart Codex CLI after installation. If the installer prints an OAuth command, run it; for example:
+
+```text
+codex mcp login cocounsel-legal
+```
 
 For a dry run:
 
 ```bash
-scripts/install_codex_skills.sh --starter --dry-run
+scripts/install_codex_skills.sh --starter --init-config --init-agents --init-mcp --dry-run
 ```
 
-For the full pack, opt in explicitly:
+For all 151 skills:
 
 ```bash
-scripts/install_codex_skills.sh --all --init-config
+scripts/install_codex_skills.sh --all --init-config --init-agents --init-mcp
 ```
 
 ## Run setup
@@ -31,10 +33,53 @@ Each practice area has a cold-start interview that writes a Codex-side practice 
 ```text
 privacy-legal-cold-start-interview
 commercial-legal-cold-start-interview
-corporate-legal-cold-start-interview
+litigation-legal-cold-start-interview
 ```
 
-Run setup before relying on substantive workflows. Otherwise the skills will either stop or produce generic output because they do not know your playbook, jurisdiction footprint, escalation rules, or house style.
+Run the matching setup before relying on substantive workflows so Codex has your playbook, jurisdiction footprint, escalation rules, and house style.
+
+## What gets installed
+
+- Skills: `~/.codex/skills/<plugin>-<skill>/SKILL.md`
+- Custom subagents: `~/.codex/agents/<plugin>-<agent>.toml`
+- Practice profiles: `~/.codex/claude-for-legal/`
+- MCP servers: managed entries in `~/.codex/config.toml`
+
+The MCP installer translates all repository `.mcp.json` declarations, deduplicates shared servers, preserves unrelated Codex config, and leaves secrets to environment variables or Codex OAuth.
+
+## Managed-agent cookbooks
+
+The five upstream managed-agent cookbooks are also ported. `scripts/codex_managed_agents.py` reads the original `agent.yaml` and `subagents/*.yaml` files and converts their runtime semantics to the Responses API shape used by Codex: local tools become bounded function tools, MCP toolsets become Responses MCP tools, referenced legal skills are loaded from `.codex/skills`, callable agents become delegated subagents, and `output_schema` becomes Structured Outputs.
+
+Validate all cookbook manifests without making an API call:
+
+```bash
+python3 scripts/codex_managed_agents.py --validate-all
+```
+
+Compile one cookbook to inspect the resolved Codex plan:
+
+```bash
+python3 scripts/codex_managed_agents.py docket-watcher --compile
+```
+
+Run against a Responses-compatible endpoint:
+
+```bash
+python3 scripts/codex_managed_agents.py docket-watcher --run 'Check the configured docket portfolio.' --workspace .
+```
+
+The live OpenAI Responses endpoint is intentionally outside the repository's test boundary. CI uses a local mock endpoint instead, so no OpenAI key is required for validation.
+
+## Mocked end-to-end validation
+
+Run:
+
+```bash
+python3 scripts/test_codex_port.py
+```
+
+This checks every managed-agent manifest/subagent, exercises a real HTTP Responses-style function-call continuation against a mock server, and runs MCP `initialize`, `tools/list`, and `tools/call` against a mock endpoint for every one of the 20 unique MCP integrations declared by the repository.
 
 ## Which skill is for me?
 
@@ -53,39 +98,8 @@ Run setup before relying on substantive workflows. Otherwise the skills will eit
 | Law student | `law-student-cold-start-interview` | `law-student-socratic-drill` |
 | Legal ops / looking for skills | `legal-builder-hub-cold-start-interview` | `legal-builder-hub-registry-browser` |
 
-## What you're installing
+## Upstream compatibility
 
-The converted Codex skills live in `.codex/skills/<plugin>-<skill>/SKILL.md`. They are adapted from the upstream Claude plugin skills but use Codex-side configuration paths:
+The original Claude plugin tree remains in this repository as the upstream source. The Codex runtime copies are generated from it; after upstream changes, the sync workflow regenerates skills and custom agents, validates MCP translation, compiles every managed-agent cookbook, and runs the mocked integration suite.
 
-```text
-~/.codex/claude-for-legal/company-profile.md
-~/.codex/claude-for-legal/<plugin>/CLAUDE.md
-```
-
-The original Claude plugin structure remains in this repository for compatibility.
-
-The starter list is maintained in `.codex/starter-skills.txt`. The full generated set remains available under `.codex/skills/`.
-
-Smoke tests are in [docs/codex-smoke-tests.md](docs/codex-smoke-tests.md).
-
-## Claude plugin compatibility
-
-If you are using upstream Claude plugin tooling instead of Codex CLI, use the original marketplace flow:
-
-```text
-/plugin marketplace add <path-to-this-repo>
-/plugin install privacy-legal@claude-for-legal
-/privacy-legal:cold-start-interview
-```
-
-That flow writes profiles to `~/.claude/plugins/config/claude-for-legal/<plugin>/CLAUDE.md`. Codex skills do not read that path unless you copy the profile into `~/.codex/claude-for-legal/<plugin>/CLAUDE.md`.
-
-## Stuck?
-
-- **Codex does not see the skills** -> restart Codex CLI after syncing `.codex/skills`.
-- **Run setup first** -> run `<plugin>-cold-start-interview` before any other skill in that practice area.
-- **Citations are flagged `[verify]`** -> configure a legal research connector or verify citations manually before relying on them.
-- **The skill cannot read a file** -> give Codex an accessible local path or move the file into the current workspace.
-- **You need the old Claude command name** -> replace `/plugin:skill` with `plugin-skill`, for example `/privacy-legal:dsar-response` becomes `privacy-legal-dsar-response`.
-
-Every output is a draft for attorney review. The skills flag uncertainty, mark citations by source, and gate irreversible actions. A lawyer reviews, verifies, and takes responsibility.
+Every output is a draft for attorney review. The workflows flag uncertainty, mark citations by source, and gate irreversible actions.
