@@ -59,7 +59,7 @@ jobs:
           CODEX_BIN: ${{ env.CODEX_BIN }}
         run: |
           set -euo pipefail
-          python3 scripts/test_real_codex_runtime.py \
+          python3 scripts/test_real_codex_runtime_release0152.py \
             --codex "$CODEX_BIN" \
             --codex-home "$CODEX_HOME" | tee runtime-validation.log
           grep -q 'RUNTIME_VALIDATION_OK' runtime-validation.log
