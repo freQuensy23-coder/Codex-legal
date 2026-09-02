@@ -1,3 +1,4 @@
+# Final validation trigger for the complete Codex port.
 name: Build merged Codex Legal
 
 on:
