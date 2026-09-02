@@ -1,3 +1,4 @@
+# trigger build after workflow-permission fix
 name: Build merged Codex Legal
 
 on:
@@ -48,9 +49,6 @@ jobs:
 
           python3 scripts/convert_to_codex_skills.py
 
-          # GITHUB_TOKEN cannot create new active workflow files. Preserve any
-          # upstream workflows as inert source files, and keep only this already
-          # existing build workflow active in the target repository.
           if [[ -d .github/workflows ]]; then
             mkdir -p .github/upstream-workflows
             for f in .github/workflows/*; do
