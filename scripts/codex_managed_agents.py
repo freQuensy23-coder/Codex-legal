@@ -84,6 +84,23 @@ def canonical_mcp_name(name: str) -> str:
     return MCP_ALIASES.get(slug, slug)
 
 
+def normalize_json_schema(value: Any) -> Any:
+    """Normalize YAML-loaded schema values into standards-compliant JSON Schema."""
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, child in value.items():
+            if key == "type" and isinstance(child, list):
+                out[key] = ["null" if item is None else item for item in child]
+            elif key == "type" and child is None:
+                out[key] = "null"
+            else:
+                out[key] = normalize_json_schema(child)
+        return out
+    if isinstance(value, list):
+        return [normalize_json_schema(item) for item in value]
+    return value
+
+
 @dataclass
 class McpServer:
     name: str
@@ -263,7 +280,7 @@ def load_agent(manifest: Path, *, model: str | None = None) -> AgentSpec:
         mcp_servers=servers,
         skills=_skills(doc, manifest),
         children=children,
-        output_schema=doc.get("output_schema"),
+        output_schema=normalize_json_schema(doc.get("output_schema")) if doc.get("output_schema") else None,
     )
 
 
@@ -437,7 +454,7 @@ def response_payload(spec: AgentSpec, user_input: Any, *, previous_response_id: 
                 "type": "json_schema",
                 "name": f"{spec.name}-output"[:64],
                 "schema": spec.output_schema,
-                "strict": True,
+                "strict": False,
             }
         }
     return payload
