@@ -1,3 +1,4 @@
+# Triggered via merge so GitHub emits a normal push event.
 name: Build merged Codex Legal
 
 on:
@@ -48,11 +49,9 @@ jobs:
 
           python3 scripts/convert_to_codex_skills.py
 
-          # Preserve the reproducible sync workflow in the resulting repository.
           mkdir -p .github/workflows
           cp ../.github/workflows/build-codex-legal.yml .github/workflows/build-codex-legal.yml
 
-          # Mechanical checks for the Codex adaptation.
           bash -n scripts/install_codex_skills.sh
           test -f .codex/README.md
           test -f .codex/starter-skills.txt
