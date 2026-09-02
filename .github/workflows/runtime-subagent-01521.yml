@@ -1,0 +1,140 @@
+name: Real Codex legal subagent spawn smoke
+
+on:
+  push:
+    branches: [runtime-smoke-01521]
+    paths:
+      - .github/workflows/runtime-subagent-01521.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  subagent-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install exact Codex 0.152.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/openai/codex/releases/download/rust-v0.152.1/codex-x86_64-unknown-linux-musl.tar.gz" -o /tmp/codex.tar.gz
+          echo "a0ed1b40b1d597b340f09ae00ecebc46670b06cb52aac315b9dc84fed0289fd0  /tmp/codex.tar.gz" | sha256sum -c -
+          mkdir /tmp/codex-bin
+          tar -xzf /tmp/codex.tar.gz -C /tmp/codex-bin
+          sudo install -m0755 "$(find /tmp/codex-bin -type f -name 'codex*' -perm -111 | head -1)" /usr/local/bin/codex
+          codex --version
+
+      - name: Install starter legal skills and custom agents
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/convert_to_codex_skills.py
+          python3 scripts/convert_to_codex_agents.py
+          export HOME="$RUNNER_TEMP/runtime-home"
+          export CODEX_HOME="$HOME/.codex"
+          scripts/install_codex_skills.sh --starter --init-config --init-agents
+          test -f "$CODEX_HOME/agents/litigation-legal-docket-watcher.toml"
+          cat >"$CODEX_HOME/config.toml" <<'TOML'
+          model = "gpt-5.6"
+          model_reasoning_effort = "xhigh"
+          model_provider = "mock_provider"
+          approval_policy = "never"
+          sandbox_mode = "read-only"
+
+          [features]
+          multi_agent = true
+          multi_agent_v2 = true
+
+          [model_providers.mock_provider]
+          name = "Local mock provider"
+          base_url = "http://127.0.0.1:18081/v1"
+          wire_api = "responses"
+          requires_openai_auth = false
+          supports_websockets = false
+          request_max_retries = 0
+          stream_max_retries = 0
+          TOML
+
+      - name: Start stateful local Responses mock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet zstandard
+          cat >/tmp/mock_spawn.py <<'PY'
+          import io,json
+          from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+          import zstandard as zstd
+          LOG='/tmp/spawn-requests.jsonl'
+          def dec(raw,enc):
+              if enc and any(x.strip().lower()=='zstd' for x in enc.split(',')):
+                  with zstd.ZstdDecompressor().stream_reader(io.BytesIO(raw)) as r: return r.read()
+              return raw
+          def sse(events): return ''.join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+          def created(rid): return {'type':'response.created','response':{'id':rid}}
+          def done(rid): return {'type':'response.completed','response':{'id':rid,'usage':{'input_tokens':1,'input_tokens_details':None,'output_tokens':1,'output_tokens_details':None,'total_tokens':2}}}
+          def msg(rid,text): return {'type':'response.output_item.done','item':{'type':'message','role':'assistant','id':'msg-'+rid,'content':[{'type':'output_text','text':text}]}}
+          class H(BaseHTTPRequestHandler):
+              def log_message(self,*a): pass
+              def do_GET(self):
+                  if self.path.endswith('/models'):
+                      b=json.dumps({'object':'list','data':[{'id':'gpt-5.6','object':'model','created':0,'owned_by':'mock'}]}).encode(); self.send_response(200); self.send_header('content-type','application/json'); self.send_header('content-length',str(len(b))); self.end_headers(); self.wfile.write(b); return
+                  self.send_error(404)
+              def do_POST(self):
+                  n=int(self.headers.get('content-length','0')); raw=self.rfile.read(n); body=json.loads(dec(raw,self.headers.get('content-encoding'))); blob=json.dumps(body,ensure_ascii=False)
+                  with open(LOG,'a',encoding='utf-8') as f: f.write(json.dumps(body,ensure_ascii=False)+'\n')
+                  if 'SUBAGENT_CHILD_SENTINEL' in blob or 'Ported tool scope' in blob and 'docket' in blob.lower():
+                      rid='resp-child'; events=[created(rid),msg(rid,'CHILD_OK'),done(rid)]
+                  elif 'spawn-call-1' in blob:
+                      rid='resp-parent-2'; events=[created(rid),msg(rid,'PARENT_OK'),done(rid)]
+                  else:
+                      rid='resp-parent-1'
+                      args=json.dumps({'message':'SUBAGENT_CHILD_SENTINEL: return CHILD_OK','task_name':'legal-docket-smoke','agent_type':'litigation-legal-docket-watcher','fork_turns':'none'})
+                      call={'type':'response.output_item.done','item':{'type':'function_call','call_id':'spawn-call-1','namespace':'collaboration','name':'spawn_agent','arguments':args}}
+                      events=[created(rid),call,done(rid)]
+                  p=sse(events); self.send_response(200); self.send_header('content-type','text/event-stream'); self.send_header('content-length',str(len(p))); self.send_header('connection','close'); self.end_headers(); self.wfile.write(p); self.wfile.flush()
+          ThreadingHTTPServer(('127.0.0.1',18081),H).serve_forever()
+          PY
+          nohup python3 /tmp/mock_spawn.py >/tmp/mock-spawn.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18081/v1/models >/dev/null && exit 0; sleep .2; done
+          cat /tmp/mock-spawn.log; exit 1
+
+      - name: Force real Codex to spawn the legal custom agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/runtime-home"
+          export CODEX_HOME="$HOME/.codex"
+          codex exec 'SUBAGENT_PARENT_SENTINEL: execute the mocked collaboration flow.' | tee /tmp/subagent-exec.txt
+          grep -q 'PARENT_OK' /tmp/subagent-exec.txt
+          for i in $(seq 1 30); do
+            count="$(wc -l </tmp/spawn-requests.jsonl 2>/dev/null || echo 0)"
+            [[ "$count" -ge 3 ]] && break
+            sleep .2
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('/tmp/spawn-requests.jsonl').read_text().splitlines() if x.strip()]
+          assert len(rows)>=3, f'expected parent+child+parent requests, got {len(rows)}'
+          blobs=[json.dumps(x,ensure_ascii=False) for x in rows]
+          assert any('SUBAGENT_CHILD_SENTINEL' in x for x in blobs), 'child task never reached a model request'
+          child=[x for x in blobs if 'SUBAGENT_CHILD_SENTINEL' in x]
+          assert any('litigation-legal-docket-watcher' in x for x in child), 'custom role identity missing in child request'
+          assert any('docket' in x.lower() for x in child), 'docket-watcher developer instructions missing in child request'
+          print('REAL_CUSTOM_AGENT_SPAWN_OK')
+          print('requests=',len(rows))
+          PY
+
+      - name: Upload subagent evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-01521-subagent-evidence
+          path: |
+            /tmp/subagent-exec.txt
+            /tmp/spawn-requests.jsonl
+            /tmp/mock-spawn.log
