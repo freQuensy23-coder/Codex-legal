@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+codex_bin="${CODEX_BIN:-$(command -v codex || true)}"
+if [[ -z "$codex_bin" ]]; then
+  echo "codex CLI not found" >&2
+  exit 1
+fi
+exec "$codex_bin" -m gpt-5.6 -c 'model_reasoning_effort="xhigh"' "$@"
