@@ -69,6 +69,7 @@ jobs:
           from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
           import zstandard as zstd
           LOG='/tmp/spawn-requests.jsonl'
+          CHILD_MARKER='This is the Codex custom-agent port of `litigation-legal/agents/docket-watcher.md`.'
           def dec(raw,enc):
               if enc and any(x.strip().lower()=='zstd' for x in enc.split(',')):
                   with zstd.ZstdDecompressor().stream_reader(io.BytesIO(raw)) as r: return r.read()
@@ -86,13 +87,14 @@ jobs:
               def do_POST(self):
                   n=int(self.headers.get('content-length','0')); raw=self.rfile.read(n); body=json.loads(dec(raw,self.headers.get('content-encoding'))); blob=json.dumps(body,ensure_ascii=False)
                   with open(LOG,'a',encoding='utf-8') as f: f.write(json.dumps(body,ensure_ascii=False)+'\n')
-                  if 'SUBAGENT_CHILD_SENTINEL' in blob or 'Ported tool scope' in blob and 'docket' in blob.lower():
+                  instructions=str(body.get('instructions') or '')
+                  if CHILD_MARKER in instructions:
                       rid='resp-child'; events=[created(rid),msg(rid,'CHILD_OK'),done(rid)]
                   elif 'spawn-call-1' in blob:
                       rid='resp-parent-2'; events=[created(rid),msg(rid,'PARENT_OK'),done(rid)]
                   else:
                       rid='resp-parent-1'
-                      args=json.dumps({'message':'SUBAGENT_CHILD_SENTINEL: return CHILD_OK','task_name':'legal-docket-smoke','agent_type':'litigation-legal-docket-watcher','fork_turns':'none'})
+                      args=json.dumps({'message':'SUBAGENT_CHILD_SENTINEL: return CHILD_OK','task_name':'legal_docket_smoke','agent_type':'litigation-legal-docket-watcher','fork_turns':'none'})
                       call={'type':'response.output_item.done','item':{'type':'function_call','call_id':'spawn-call-1','namespace':'collaboration','name':'spawn_agent','arguments':args}}
                       events=[created(rid),call,done(rid)]
                   p=sse(events); self.send_response(200); self.send_header('content-type','text/event-stream'); self.send_header('content-length',str(len(p))); self.send_header('connection','close'); self.end_headers(); self.wfile.write(p); self.wfile.flush()
@@ -118,15 +120,21 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
+          CHILD_MARKER='This is the Codex custom-agent port of `litigation-legal/agents/docket-watcher.md`.'
           rows=[json.loads(x) for x in Path('/tmp/spawn-requests.jsonl').read_text().splitlines() if x.strip()]
           assert len(rows)>=3, f'expected parent+child+parent requests, got {len(rows)}'
-          blobs=[json.dumps(x,ensure_ascii=False) for x in rows]
-          assert any('SUBAGENT_CHILD_SENTINEL' in x for x in blobs), 'child task never reached a model request'
-          child=[x for x in blobs if 'SUBAGENT_CHILD_SENTINEL' in x]
-          assert any('litigation-legal-docket-watcher' in x for x in child), 'custom role identity missing in child request'
-          assert any('docket' in x.lower() for x in child), 'docket-watcher developer instructions missing in child request'
+          child=[row for row in rows if CHILD_MARKER in str(row.get('instructions') or '')]
+          assert child, 'custom docket-watcher child request never reached the local model mock'
+          body=child[0]
+          blob=json.dumps(body,ensure_ascii=False)
+          assert 'SUBAGENT_CHILD_SENTINEL' in blob, 'child task missing from child request'
+          assert 'docket' in blob.lower(), 'docket-watcher developer instructions missing in child request'
+          assert body.get('model') == 'gpt-5.6', body.get('model')
+          assert (body.get('reasoning') or {}).get('effort') == 'xhigh', body.get('reasoning')
           print('REAL_CUSTOM_AGENT_SPAWN_OK')
           print('requests=',len(rows))
+          print('child_model=',body.get('model'))
+          print('child_reasoning=',(body.get('reasoning') or {}).get('effort'))
           PY
 
       - name: Upload subagent evidence
