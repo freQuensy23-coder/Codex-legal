@@ -14,7 +14,6 @@ import json
 import os
 import select
 import subprocess
-import sys
 import time
 import tomllib
 from pathlib import Path
@@ -26,8 +25,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def base(codex: str) -> list[str]:
-    # Codex 0.152.1 rejects --strict-config on `debug`; keep the shared runtime
-    # configuration explicit without that flag.
     return [
         codex,
         "-c", 'orchestrator.mcp.enabled=false',
@@ -171,6 +168,60 @@ def assert_request_has_skill(sid: str, requests: list[dict[str, Any]]) -> None:
         )
 
 
+def collect_items(value: Any, item_type: str) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        if value.get("type") == item_type:
+            result.append(value)
+        for child in value.values():
+            result.extend(collect_items(child, item_type))
+    elif isinstance(value, list):
+        for child in value:
+            result.extend(collect_items(child, item_type))
+    return result
+
+
+def compact_spawn_diagnostics(requests: list[dict[str, Any]]) -> str:
+    outputs: list[dict[str, Any]] = []
+    for request in requests:
+        outputs.extend(collect_items(request, "function_call_output"))
+    if not outputs:
+        return "no function_call_output captured"
+    compact: list[dict[str, Any]] = []
+    for item in outputs:
+        compact.append({
+            "call_id": item.get("call_id"),
+            "output": item.get("output"),
+        })
+    return json.dumps(compact, ensure_ascii=False)[:8000]
+
+
+def invoke_skill(
+    codex: str,
+    env: dict[str, str],
+    overrides: list[str],
+    sid: str,
+    skill: dict[str, Any],
+) -> dict[str, Any]:
+    skill_path = skill["path"]
+    skill_name = skill["name"]
+    runtime.STATE.reset_simple()
+    prompt = (
+        f"Use [${skill_name}](skill://{skill_path}). "
+        "Do not call tools. Reply exactly MOCK_OK."
+    )
+    proc = runtime.run(base(codex) + overrides + ["exec", prompt], env, timeout=120, check=False)
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"real Codex skill exec failed for {sid}: rc={proc.returncode}\n"
+            f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+        )
+    if "MOCK_OK" not in (proc.stdout + proc.stderr):
+        raise SystemExit(f"real Codex skill exec did not return localhost mock response for {sid}")
+    assert_request_has_skill(sid, runtime.STATE.requests)
+    return runtime.STATE.requests[0]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--codex", required=True)
@@ -220,50 +271,28 @@ def main() -> int:
     server, thread = runtime.start_server()
     port = server.server_address[1]
     overrides = runtime.model_overrides(port)
-    cmd_base = base(codex)
-    first_request: dict[str, Any] | None = None
     try:
-        # Every legal skill is activated through Codex's real explicit skill-path
-        # mechanism. This tests discovery, selection, SKILL.md reading and prompt
-        # injection rather than merely checking files on disk.
-        for index, sid in enumerate(expected_skill_ids, 1):
-            skill = discovered[sid]
-            skill_path = skill["path"]
-            skill_name = skill["name"]
-            runtime.STATE.reset_simple()
-            prompt = (
-                f"Use [${skill_name}](skill://{skill_path}). "
-                "Do not call tools. Reply exactly MOCK_OK."
-            )
-            proc = runtime.run(cmd_base + overrides + ["exec", prompt], env, timeout=120, check=False)
-            if proc.returncode != 0:
-                raise SystemExit(
-                    f"real Codex skill exec failed for {sid}: rc={proc.returncode}\n"
-                    f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-                )
-            if "MOCK_OK" not in (proc.stdout + proc.stderr):
-                raise SystemExit(f"real Codex skill exec did not return localhost mock response for {sid}")
-            assert_request_has_skill(sid, runtime.STATE.requests)
-            if first_request is None:
-                first_request = runtime.STATE.requests[0]
-            if index % 25 == 0 or index == len(expected_skill_ids):
-                print(f"skills_exec_ok={index}/{len(expected_skill_ids)}")
+        # Run one real skill first so we can inspect the real parent tool schema
+        # before spending minutes on the exhaustive 151-skill pass.
+        representative_sid = "litigation-legal:claim-chart"
+        first_request = invoke_skill(codex, env, overrides, representative_sid, discovered[representative_sid])
+        print("representative_skill_exec_ok=1")
 
-        assert first_request is not None
         tool_blob = runtime.stringify(first_request.get("tools", []))
         missing_roles = sorted(role for role in agents if role not in tool_blob)
         if missing_roles:
             raise SystemExit("Codex spawn_agent schema missing roles: " + ", ".join(missing_roles))
         print(f"agent_discovery_ok={len(agents)}")
 
-        # Force the real Codex multi-agent runtime to spawn every converted role.
+        # Validate spawning before the expensive exhaustive skill loop. On a real
+        # spawn failure report the exact function_call_output returned by Codex.
         for role, path in agents.items():
             data = tomllib.loads(path.read_text(encoding="utf-8"))
             instructions = data["developer_instructions"]
             probe = instructions[: min(180, len(instructions))]
             runtime.STATE.reset_spawn(role, probe)
             proc = runtime.run(
-                cmd_base + overrides + [
+                base(codex) + overrides + [
                     "exec",
                     f"SPAWN_ROLE:{role}. Use spawn_agent with exactly that agent_type.",
                 ],
@@ -271,15 +300,30 @@ def main() -> int:
                 timeout=150,
                 check=False,
             )
+            diagnostics = compact_spawn_diagnostics(runtime.STATE.requests)
             if proc.returncode != 0:
                 raise SystemExit(
-                    f"spawn test failed for {role}: rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+                    f"spawn test failed for {role}: rc={proc.returncode}; tool_output={diagnostics}\n"
+                    f"STDOUT:\n{proc.stdout[-4000:]}\nSTDERR:\n{proc.stderr[-4000:]}"
                 )
             if runtime.STATE.error:
-                raise SystemExit(runtime.STATE.error)
+                raise SystemExit(
+                    f"{runtime.STATE.error}; tool_output={diagnostics}; "
+                    f"stdout_tail={proc.stdout[-2000:]!r}; stderr_tail={proc.stderr[-2000:]!r}"
+                )
             if not runtime.STATE.child_answered.is_set():
-                raise SystemExit(f"spawn test did not complete child request for {role}")
+                raise SystemExit(
+                    f"spawn test did not complete child request for {role}; tool_output={diagnostics}"
+                )
             print(f"agent_spawn_ok={role}")
+
+        # Every legal skill is activated through Codex's real explicit skill-path
+        # mechanism. This tests discovery, selection, SKILL.md reading and prompt
+        # injection rather than merely checking files on disk.
+        for index, sid in enumerate(expected_skill_ids, 1):
+            invoke_skill(codex, env, overrides, sid, discovered[sid])
+            if index % 25 == 0 or index == len(expected_skill_ids):
+                print(f"skills_exec_ok={index}/{len(expected_skill_ids)}")
     finally:
         server.shutdown()
         server.server_close()
