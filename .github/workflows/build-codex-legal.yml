@@ -1,0 +1,91 @@
+name: Build merged Codex Legal
+
+on:
+  push:
+    paths:
+      - .github/workflows/build-codex-legal.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  merge-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target bootstrap
+        uses: actions/checkout@v4
+
+      - name: Merge upstream and rebuild Codex skills
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE=9cecd91b0f26f732d18315afc3c9bb5ff99e0fbb
+          CODEX_COMMITS=(
+            74f88fd06945b138c98759aaaeaac6cc5e5405e3
+            965ae546f403f7efdf5477a9c88470d316c62f96
+            10570eda5e34b395adf7517b2cc354c57ca00b51
+          )
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          rm -rf build
+          git clone https://github.com/anthropics/claude-for-legal.git build
+          cd build
+          git remote add codex https://github.com/anamanlab/Claude-legal-codex.git
+          git fetch codex main
+
+          test "$(git merge-base codex/main origin/main)" = "$BASE"
+
+          for commit in "${CODEX_COMMITS[@]}"; do
+            git cherry-pick -X theirs "$commit"
+          done
+
+          python3 scripts/convert_to_codex_skills.py
+
+          # Preserve the reproducible sync workflow in the resulting repository.
+          mkdir -p .github/workflows
+          cp ../.github/workflows/build-codex-legal.yml .github/workflows/build-codex-legal.yml
+
+          # Mechanical checks for the Codex adaptation.
+          bash -n scripts/install_codex_skills.sh
+          test -f .codex/README.md
+          test -f .codex/starter-skills.txt
+          test -f .codex/skills/litigation-legal-claim-chart/SKILL.md
+          test -f .codex/skills/privacy-legal-dsar-response/SKILL.md
+          test -f .codex/skills/ai-governance-legal-use-case-triage/SKILL.md
+
+          if grep -R -n --fixed-strings '~/.claude/plugins/config/claude-for-legal' .codex/skills; then
+            echo "Found stale Claude config path in generated Codex skills" >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path('.').rglob('*.json'):
+              if '.git' not in path.parts:
+                  json.loads(path.read_text(encoding='utf-8'))
+          skills = list(Path('.codex/skills').glob('*/SKILL.md'))
+          if len(skills) < 151:
+              raise SystemExit(f'expected at least 151 converted skills, got {len(skills)}')
+          print(f'validated {len(skills)} converted Codex skills')
+          PY
+
+          tmp_home="$(mktemp -d)"
+          HOME="$tmp_home" scripts/install_codex_skills.sh --starter --init-config
+          test -f "$tmp_home/.codex/skills/litigation-legal-claim-chart/SKILL.md"
+          test -f "$tmp_home/.codex/claude-for-legal/company-profile.md"
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync Anthropic upstream and regenerate Codex skills"
+          fi
+
+          git remote add target "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPO}.git"
+          git push --force target HEAD:main
