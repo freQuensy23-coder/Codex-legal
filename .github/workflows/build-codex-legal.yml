@@ -1,4 +1,5 @@
 # Final validation trigger for the complete Codex port.
+# Validation revision: normalize YAML null types before Responses schema validation.
 name: Build merged Codex Legal
 
 on:
