@@ -10,12 +10,14 @@ fi
 
 codex_home="${CODEX_HOME:-${HOME}/.codex}"
 config_root="${codex_home}/claude-for-legal"
-runtime="$(mktemp -d)"
+runtime="${config_root}/runtime-marketplace"
 agents_tmp="$(mktemp -d)"
-trap 'rm -rf "$runtime" "$agents_tmp"' EXIT
+trap 'rm -rf "$agents_tmp"' EXIT
 
 mkdir -p "$codex_home" "$config_root" "$codex_home/agents"
 
+# Local marketplaces are referenced by path by Codex, so this runtime tree must
+# be persistent. Rebuild it atomically under CODEX_HOME rather than /tmp.
 python3 "$repo_root/scripts/build_codex_marketplace.py" \
   --output "$runtime" \
   --config-root "$config_root"
@@ -45,13 +47,14 @@ for plugin_dir in "$runtime"/plugins/*; do
 done
 
 # Install native Codex agent roles. Generated role names are namespaced by legal plugin.
+agent_count=0
 for src in "$agents_tmp"/*.toml; do
   [[ -f "$src" ]] || continue
   cp "$src" "$codex_home/agents/$(basename "$src")"
+  agent_count=$((agent_count + 1))
 done
 
-# Reinstall the generated marketplace from a fresh snapshot. Removal failures are
-# harmless on first install.
+# Re-register the persistent marketplace. Removal failures are harmless on first install.
 "$codex_bin" plugin marketplace remove codex-legal >/dev/null 2>&1 || true
 "$codex_bin" plugin marketplace add "$runtime" >/dev/null
 
@@ -83,7 +86,8 @@ PY
 cat <<EOF
 Codex Legal local install complete.
 Plugins: ${#plugins[@]}
-Agents: $(find "$codex_home/agents" -maxdepth 1 -name '*-legal-*.toml' -o -name 'law-student-*.toml' -o -name 'legal-clinic-*.toml' | wc -l | tr -d ' ')
+Agents: $agent_count
 Practice data: $config_root
-Run with GPT-5.6/xhigh: $repo_root/scripts/codex-legal
+Marketplace: $runtime
+Run with GPT-5.6/xhigh: bash $repo_root/scripts/codex-legal
 EOF
