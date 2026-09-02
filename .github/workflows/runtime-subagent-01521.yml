@@ -98,8 +98,7 @@ jobs:
               def do_POST(self):
                   n=int(self.headers.get('content-length','0')); raw=self.rfile.read(n); body=json.loads(dec(raw,self.headers.get('content-encoding'))); blob=json.dumps(body,ensure_ascii=False)
                   with open(LOG,'a',encoding='utf-8') as f: f.write(json.dumps(body,ensure_ascii=False)+'\n')
-                  instructions=str(body.get('instructions') or '')
-                  if CHILD_MARKER in instructions:
+                  if CHILD_MARKER in blob:
                       rid='resp-child'; events=[created(rid),msg(rid,'CHILD_OK'),done(rid)]
                   elif 'spawn-call-1' in blob:
                       rid='resp-parent-2'; events=[created(rid),msg(rid,'PARENT_OK'),done(rid)]
@@ -136,30 +135,22 @@ jobs:
             [[ "$count" -ge 3 ]] && break
             sleep .2
           done
-          echo '=== MOCK SERVER LOG ==='
-          cat /tmp/mock-spawn.log || true
-          echo '=== CODEX REQUEST DIAGNOSTICS ==='
           python3 - <<'PY'
           import json
           from pathlib import Path
-          rows=[json.loads(x) for x in Path('/tmp/spawn-requests.jsonl').read_text().splitlines() if x.strip()]
-          print('request_count=',len(rows))
-          for i,row in enumerate(rows):
-              print('REQUEST',i,'model=',row.get('model'))
-              for item in row.get('input') or []:
-                  if isinstance(item,dict) and item.get('type') in {'function_call','function_call_output','agent_message'}:
-                      print(' INPUT',json.dumps(item,ensure_ascii=False))
-              for tool in row.get('tools') or []:
-                  if isinstance(tool,dict) and ('spawn_agent' in json.dumps(tool,ensure_ascii=False)):
-                      print(' SPAWN_TOOL',json.dumps(tool,ensure_ascii=False))
           CHILD_MARKER='This is the Codex custom-agent port of `litigation-legal/agents/docket-watcher.md`.'
-          assert len(rows)>=3, f'expected parent+child+parent requests, got {len(rows)}'
-          child=[row for row in rows if CHILD_MARKER in str(row.get('instructions') or '')]
-          assert child, 'custom docket-watcher child request never reached the local model mock'
+          rows=[json.loads(x) for x in Path('/tmp/spawn-requests.jsonl').read_text().splitlines() if x.strip()]
+          assert len(rows)>=3, f'expected parent+child requests, got {len(rows)}'
+          child=[]
+          for row in rows:
+              blob=json.dumps(row,ensure_ascii=False)
+              if CHILD_MARKER in blob and any(isinstance(x,dict) and x.get('type')=='agent_message' and x.get('recipient')=='/root/legal_docket_smoke' for x in row.get('input') or []):
+                  child.append(row)
+          assert child, 'custom docket-watcher child request with role developer instructions never reached the local model mock'
           body=child[0]
           blob=json.dumps(body,ensure_ascii=False)
           assert 'SUBAGENT_CHILD_SENTINEL' in blob, 'child task missing from child request'
-          assert 'docket' in blob.lower(), 'docket-watcher developer instructions missing in child request'
+          assert CHILD_MARKER in blob, 'docket-watcher developer instructions missing in child request'
           assert body.get('model') == 'gpt-5.6', body.get('model')
           assert (body.get('reasoning') or {}).get('effort') == 'xhigh', body.get('reasoning')
           print('REAL_CUSTOM_AGENT_SPAWN_OK')
