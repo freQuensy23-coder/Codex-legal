@@ -78,6 +78,17 @@ jobs:
           def created(rid): return {'type':'response.created','response':{'id':rid}}
           def done(rid): return {'type':'response.completed','response':{'id':rid,'usage':{'input_tokens':1,'input_tokens_details':None,'output_tokens':1,'output_tokens_details':None,'total_tokens':2}}}
           def msg(rid,text): return {'type':'response.output_item.done','item':{'type':'message','role':'assistant','id':'msg-'+rid,'content':[{'type':'output_text','text':text}]}}
+          def advertised_spawn(tools):
+              for tool in tools or []:
+                  if not isinstance(tool,dict):
+                      continue
+                  if tool.get('type')=='namespace':
+                      for child in tool.get('tools') or []:
+                          if isinstance(child,dict) and child.get('name')=='spawn_agent':
+                              return tool.get('name'), 'spawn_agent', tool
+                  if tool.get('name')=='spawn_agent':
+                      return tool.get('namespace'), 'spawn_agent', tool
+              return None,None,None
           class H(BaseHTTPRequestHandler):
               def log_message(self,*a): pass
               def do_GET(self):
@@ -93,10 +104,18 @@ jobs:
                   elif 'spawn-call-1' in blob:
                       rid='resp-parent-2'; events=[created(rid),msg(rid,'PARENT_OK'),done(rid)]
                   else:
-                      rid='resp-parent-1'
-                      args=json.dumps({'message':'SUBAGENT_CHILD_SENTINEL: return CHILD_OK','task_name':'legal_docket_smoke','agent_type':'litigation-legal-docket-watcher','fork_turns':'none'})
-                      call={'type':'response.output_item.done','item':{'type':'function_call','call_id':'spawn-call-1','namespace':'collaboration','name':'spawn_agent','arguments':args}}
-                      events=[created(rid),call,done(rid)]
+                      namespace,name,decl=advertised_spawn(body.get('tools'))
+                      print('ADVERTISED_SPAWN='+json.dumps({'namespace':namespace,'name':name,'decl':decl}),flush=True)
+                      if not name:
+                          rid='resp-no-spawn'; events=[created(rid),msg(rid,'NO_SPAWN_TOOL'),done(rid)]
+                      else:
+                          rid='resp-parent-1'
+                          args=json.dumps({'message':'SUBAGENT_CHILD_SENTINEL: return CHILD_OK','task_name':'legal_docket_smoke','agent_type':'litigation-legal-docket-watcher','fork_turns':'none'})
+                          item={'type':'function_call','call_id':'spawn-call-1','name':name,'arguments':args}
+                          if namespace:
+                              item['namespace']=namespace
+                          call={'type':'response.output_item.done','item':item}
+                          events=[created(rid),call,done(rid)]
                   p=sse(events); self.send_response(200); self.send_header('content-type','text/event-stream'); self.send_header('content-length',str(len(p))); self.send_header('connection','close'); self.end_headers(); self.wfile.write(p); self.wfile.flush()
           ThreadingHTTPServer(('127.0.0.1',18081),H).serve_forever()
           PY
