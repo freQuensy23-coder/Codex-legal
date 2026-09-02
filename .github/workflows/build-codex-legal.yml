@@ -1,155 +1,80 @@
-# Final validation trigger for the complete Codex port.
-# Validation revision: normalize YAML null types before Responses schema validation.
-name: Build merged Codex Legal
+name: Validate Codex Legal runtime
 
 on:
   push:
-    paths:
-      - .github/workflows/build-codex-legal.yml
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  merge-upstream:
+  real-codex-runtime:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Checkout target port layer
+      - name: Checkout Codex Legal
         uses: actions/checkout@v4
 
-      - name: Merge upstream and rebuild Codex surfaces
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_REPO: ${{ github.repository }}
+      - name: Install exact Codex 0.152.1 release
         shell: bash
         run: |
           set -euo pipefail
+          url="https://github.com/openai/codex/releases/download/rust-v0.152.1/codex-x86_64-unknown-linux-musl.tar.gz"
+          expected="a0ed1b40b1d597b340f09ae00ecebc46670b06cb52aac315b9dc84fed0289fd0"
+          curl -fL --retry 4 --retry-all-errors -o /tmp/codex.tgz "$url"
+          echo "$expected  /tmp/codex.tgz" | sha256sum -c -
+          mkdir -p /tmp/codex-release
+          tar -xzf /tmp/codex.tgz -C /tmp/codex-release
+          codex_bin="$(find /tmp/codex-release -maxdepth 2 -type f -name 'codex*' ! -name '*.sigstore' | head -n 1)"
+          test -n "$codex_bin"
+          chmod +x "$codex_bin"
+          "$codex_bin" --version | tee /tmp/codex-version.txt
+          grep -q '0.152.1' /tmp/codex-version.txt
+          echo "CODEX_BIN=$codex_bin" >> "$GITHUB_ENV"
 
-          PORT_ROOT="$PWD"
-          BASE=9cecd91b0f26f732d18315afc3c9bb5ff99e0fbb
-          CODEX_COMMITS=(
-            74f88fd06945b138c98759aaaeaac6cc5e5405e3
-            965ae546f403f7efdf5477a9c88470d316c62f96
-            10570eda5e34b395adf7517b2cc354c57ca00b51
-          )
+      - name: Create isolated Codex home
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_home="$(mktemp -d)"
+          echo "TEST_HOME=$test_home" >> "$GITHUB_ENV"
+          echo "CODEX_HOME=$test_home/.codex" >> "$GITHUB_ENV"
+          mkdir -p "$test_home/.codex"
 
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Build and install all legal plugins locally
+        shell: bash
+        env:
+          HOME: ${{ env.TEST_HOME }}
+          CODEX_HOME: ${{ env.CODEX_HOME }}
+          CODEX_BIN: ${{ env.CODEX_BIN }}
+        run: |
+          set -euo pipefail
+          bash scripts/install_codex_legal.sh
 
-          rm -rf build
-          git clone https://github.com/anthropics/claude-for-legal.git build
-          cd build
-          git remote add codex https://github.com/anamanlab/Claude-legal-codex.git
-          git fetch codex main
+      - name: Exhaustive real Codex runtime validation
+        env:
+          HOME: ${{ env.TEST_HOME }}
+          CODEX_HOME: ${{ env.CODEX_HOME }}
+          CODEX_BIN: ${{ env.CODEX_BIN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/test_real_codex_runtime.py \
+            --codex "$CODEX_BIN" \
+            --codex-home "$CODEX_HOME" | tee runtime-validation.log
+          grep -q 'RUNTIME_VALIDATION_OK' runtime-validation.log
 
-          test "$(git merge-base codex/main origin/main)" = "$BASE"
+      - name: Assert no Managed Agents runtime is wired in
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -n -E 'codex_managed_agents|deploy-managed-agent|Managed Agents API' \
+            scripts/install_codex_legal.sh scripts/build_codex_marketplace.py scripts/test_real_codex_runtime.py
 
-          for commit in "${CODEX_COMMITS[@]}"; do
-            git cherry-pick -X theirs "$commit"
-          done
-
-          # Apply the maintained Codex port layer that the original fork lacked.
-          cp "$PORT_ROOT/scripts/convert_to_codex_agents.py" scripts/convert_to_codex_agents.py
-          cp "$PORT_ROOT/scripts/install_codex_mcp.py" scripts/install_codex_mcp.py
-          cp "$PORT_ROOT/scripts/install_codex_skills.sh" scripts/install_codex_skills.sh
-          cp "$PORT_ROOT/scripts/codex_managed_agents.py" scripts/codex_managed_agents.py
-          cp "$PORT_ROOT/scripts/test_codex_port.py" scripts/test_codex_port.py
-          cp "$PORT_ROOT/.codex/README.md" .codex/README.md
-          cp "$PORT_ROOT/QUICKSTART.md" QUICKSTART.md
-          cp "$PORT_ROOT/AGENTS.md" AGENTS.md
-
-          python3 scripts/convert_to_codex_skills.py
-          python3 scripts/convert_to_codex_agents.py
-
-          # The GitHub App cannot create unrelated upstream workflow files. Preserve
-          # them as inert source copies while keeping this repo's sync workflow live.
-          if [[ -d .github/workflows ]]; then
-            mkdir -p .github/upstream-workflows
-            for f in .github/workflows/*; do
-              [[ -f "$f" ]] && cp "$f" ".github/upstream-workflows/$(basename "$f")"
-            done
-            rm -rf .github/workflows
-          fi
-          mkdir -p .github/workflows
-          cp "$PORT_ROOT/.github/workflows/build-codex-legal.yml" .github/workflows/build-codex-legal.yml
-
-          bash -n scripts/install_codex_skills.sh
-          python3 scripts/install_codex_mcp.py --check
-          python3 scripts/codex_managed_agents.py --validate-all
-          python3 scripts/test_codex_port.py
-          grep -q -- '--init-mcp' QUICKSTART.md
-          grep -q -- '--init-agents' QUICKSTART.md
-          grep -q -- 'managed-agent' QUICKSTART.md
-
-          test -f AGENTS.md
-          test -f .codex/README.md
-          test -f .codex/starter-skills.txt
-          test -f .codex/skills/litigation-legal-claim-chart/SKILL.md
-          test -f .codex/skills/privacy-legal-dsar-response/SKILL.md
-          test -f .codex/skills/ai-governance-legal-use-case-triage/SKILL.md
-          test -f .codex/agents/litigation-legal-docket-watcher.toml
-
-          if grep -R -n --fixed-strings '~/.claude/plugins/config/claude-for-legal' .codex/skills .codex/agents; then
-            echo "Found stale Claude config path in generated Codex runtime files" >&2
-            exit 1
-          fi
-
-          python3 - <<'PY'
-          import json
-          import tomllib
-          from pathlib import Path
-
-          for path in Path('.').rglob('*.json'):
-              if '.git' not in path.parts:
-                  json.loads(path.read_text(encoding='utf-8'))
-
-          skills = list(Path('.codex/skills').glob('*/SKILL.md'))
-          if len(skills) < 151:
-              raise SystemExit(f'expected at least 151 converted skills, got {len(skills)}')
-
-          source_agents = [
-              p for p in Path('.').glob('**/agents/*.md')
-              if '.codex' not in p.parts and '.git' not in p.parts
-          ]
-          codex_agents = list(Path('.codex/agents').glob('*.toml'))
-          if len(codex_agents) != len(source_agents):
-              raise SystemExit(
-                  f'agent conversion mismatch: source={len(source_agents)} codex={len(codex_agents)}'
-              )
-          for path in codex_agents:
-              data = tomllib.loads(path.read_text(encoding='utf-8'))
-              for key in ('name', 'description', 'developer_instructions'):
-                  if not data.get(key):
-                      raise SystemExit(f'{path}: missing {key}')
-
-          print(f'validated {len(skills)} skills and {len(codex_agents)} custom agents')
-          PY
-
-          tmp_home="$(mktemp -d)"
-          HOME="$tmp_home" scripts/install_codex_skills.sh \
-            --starter --init-config --init-agents --init-mcp
-          test -f "$tmp_home/.codex/skills/litigation-legal-claim-chart/SKILL.md"
-          test -f "$tmp_home/.codex/claude-for-legal/company-profile.md"
-          test -f "$tmp_home/.codex/agents/litigation-legal-docket-watcher.toml"
-          test -f "$tmp_home/.codex/config.toml"
-          python3 - "$tmp_home/.codex/config.toml" <<'PY'
-          import sys, tomllib
-          from pathlib import Path
-          data = tomllib.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-          servers = data.get('mcp_servers', {})
-          for required in ('courtlistener', 'google-drive', 'slack', 'cocounsel-legal'):
-              if required not in servers:
-                  raise SystemExit(f'missing MCP server in generated config: {required}')
-          if len(servers) != 20:
-              raise SystemExit(f'expected 20 installed MCP servers, got {len(servers)}')
-          print(f'validated installed MCP config with {len(servers)} servers')
-          PY
-
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Sync upstream and rebuild complete Codex port"
-          fi
-
-          git remote add target "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPO}.git"
-          git push --force target HEAD:main
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-legal-runtime-validation
+          path: runtime-validation.log
+          if-no-files-found: ignore
