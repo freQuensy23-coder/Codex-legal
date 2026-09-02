@@ -47,6 +47,40 @@ Run the matching setup before relying on substantive workflows so Codex has your
 
 The MCP installer translates all repository `.mcp.json` declarations, deduplicates shared servers, preserves unrelated Codex config, and leaves secrets to environment variables or Codex OAuth.
 
+## Managed-agent cookbooks
+
+The five upstream managed-agent cookbooks are also ported. `scripts/codex_managed_agents.py` reads the original `agent.yaml` and `subagents/*.yaml` files and converts their runtime semantics to the Responses API shape used by Codex: local tools become bounded function tools, MCP toolsets become Responses MCP tools, referenced legal skills are loaded from `.codex/skills`, callable agents become delegated subagents, and `output_schema` becomes Structured Outputs.
+
+Validate all cookbook manifests without making an API call:
+
+```bash
+python3 scripts/codex_managed_agents.py --validate-all
+```
+
+Compile one cookbook to inspect the resolved Codex plan:
+
+```bash
+python3 scripts/codex_managed_agents.py docket-watcher --compile
+```
+
+Run against a Responses-compatible endpoint:
+
+```bash
+python3 scripts/codex_managed_agents.py docket-watcher --run 'Check the configured docket portfolio.' --workspace .
+```
+
+The live OpenAI Responses endpoint is intentionally outside the repository's test boundary. CI uses a local mock endpoint instead, so no OpenAI key is required for validation.
+
+## Mocked end-to-end validation
+
+Run:
+
+```bash
+python3 scripts/test_codex_port.py
+```
+
+This checks every managed-agent manifest/subagent, exercises a real HTTP Responses-style function-call continuation against a mock server, and runs MCP `initialize`, `tools/list`, and `tools/call` against a mock endpoint for every one of the 20 unique MCP integrations declared by the repository.
+
 ## Which skill is for me?
 
 | You are a... | Start with... | Then try... |
@@ -66,6 +100,6 @@ The MCP installer translates all repository `.mcp.json` declarations, deduplicat
 
 ## Upstream compatibility
 
-The original Claude plugin tree remains in this repository as the upstream source. The Codex runtime copies are generated from it; after upstream changes, the sync workflow regenerates skills and agents and validates the MCP translation.
+The original Claude plugin tree remains in this repository as the upstream source. The Codex runtime copies are generated from it; after upstream changes, the sync workflow regenerates skills and custom agents, validates MCP translation, compiles every managed-agent cookbook, and runs the mocked integration suite.
 
 Every output is a draft for attorney review. The workflows flag uncertainty, mark citations by source, and gate irreversible actions.
