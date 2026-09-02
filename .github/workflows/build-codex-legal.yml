@@ -59,7 +59,7 @@ jobs:
           CODEX_BIN: ${{ env.CODEX_BIN }}
         run: |
           set -euo pipefail
-          python3 scripts/test_real_codex_runtime_release0152.py \
+          python3 scripts/test_real_codex_runtime_v2.py \
             --codex "$CODEX_BIN" \
             --codex-home "$CODEX_HOME" | tee runtime-validation.log
           grep -q 'RUNTIME_VALIDATION_OK' runtime-validation.log
@@ -69,7 +69,10 @@ jobs:
         run: |
           set -euo pipefail
           ! grep -R -n -E 'codex_managed_agents|deploy-managed-agent|Managed Agents API' \
-            scripts/install_codex_legal.sh scripts/build_codex_marketplace.py scripts/test_real_codex_runtime.py
+            scripts/install_codex_legal.sh \
+            scripts/build_codex_marketplace.py \
+            scripts/test_real_codex_runtime.py \
+            scripts/test_real_codex_runtime_v2.py
 
       - name: Upload validation log
         if: always()
